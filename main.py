@@ -3,7 +3,8 @@ from aiogram import Bot, Dispatcher, types
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 ===== KEEP ALIVE (REPLIT 24/7) =====
 
-from flask import Flaskfrom threading import Thread
+from flask import Flask
+from threading import Thread
 
 app = Flask('')
 
