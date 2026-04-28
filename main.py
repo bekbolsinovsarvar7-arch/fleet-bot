@@ -1,8 +1,12 @@
+import asyncio
+import os
+from datetime import datetime
+
 import aiosqlite
 from aiogram import Bot, Dispatcher, types
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-===== KEEP ALIVE (REPLIT 24/7) =====
 
+# ===== KEEP ALIVE =====
 from flask import Flask
 from threading import Thread
 
