@@ -55,6 +55,18 @@ async def init_db():
         """)
         await db.commit()
 
+# ===== INSERT TRUCKS (1 marta ishlat) =====
+async def insert_trucks():
+    trucks = ["101","184","250","322","325","412","500","612","617"]
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        for t in trucks:
+            await db.execute(
+                "INSERT OR IGNORE INTO trucks (truck) VALUES (?)",
+                (t,)
+            )
+        await db.commit()
+
 # ===== PARSER =====
 async def parse_message(text):
     import re
@@ -79,7 +91,7 @@ async def parse_message(text):
 # ===== START =====
 @dp.message(lambda m: m.text == "/start")
 async def start(message: types.Message):
-    await message.answer("🚛 BOT IS WORKING")
+    await message.answer("🚛 FAIR & FAST SYSTEM READY")
 
 # ===== HANDLE MESSAGE =====
 @dp.message(lambda m: m.text and not m.text.startswith("/"))
@@ -93,10 +105,21 @@ async def handle_message(message: types.Message):
     truck, action, note = parsed
 
     async with aiosqlite.connect(DB_NAME) as db:
+
+        # STATUS UPDATE
+        for word in ["shop", "yard", "hometime", "road"]:
+            if word in message.text.lower():
+                await db.execute(
+                    "UPDATE trucks SET status=? WHERE truck=?",
+                    (word, truck)
+                )
+
+        # LOG SAVE
         await db.execute(
             "INSERT INTO logs (truck, action, note) VALUES (?, ?, ?)",
             (truck, action, note)
         )
+
         await db.commit()
 
     await message.answer(f"✅ {truck} → {action}")
@@ -106,15 +129,84 @@ async def daily_report():
 
     async with aiosqlite.connect(DB_NAME) as db:
         cursor = await db.execute("""
-        SELECT truck, action FROM logs
+        SELECT truck, action, note FROM logs
         WHERE DATE(created_at)=DATE('now')
         """)
         rows = await cursor.fetchall()
 
-    text = "📊 DAILY REPORT\n\n"
+        cursor2 = await db.execute("SELECT truck, status FROM trucks")
+        status_rows = await cursor2.fetchall()
 
-    for t, a in rows:
-        text += f"{t} → {a}\n"
+    issues, planned, done = [], [], []
+
+    for t, a, n in rows:
+        if a == "issue":
+            issues.append((t, n))
+        elif a == "planned":
+            planned.append((t, n))
+        elif a == "done":
+            done.append((t, n))
+
+    done_set = {t for t, _ in done}
+    active = [(t, n) for t, n in issues if t not in done_set]
+
+    status_map = {}
+    for t, s in status_rows:
+        status_map.setdefault(s, []).append(t)
+
+    text = "📊 FAIR & FAST REPORT\n"
+    text += f"🗓 {datetime.now().strftime('%d-%b-%Y')}\n\n"
+
+    text += "⚙️ ON PROCESS:\n"
+    for t, n in active:
+        text += f"{t} — {n}\n"
+
+    text += "\n📅 PLANNED:\n"
+    for t, n in planned:
+        text += f"{t} — {n}\n"
+
+    text += "\n✅ DONE:\n"
+    for t, _ in done:
+        text += f"{t}\n"
+
+    text += "\n📍 STATUS:\n"
+    for s, trucks in status_map.items():
+        text += f"\n{s.upper()}:\n"
+        text += " ".join(trucks[:10]) + "\n"
+
+    if CHAT_ID:
+        await bot.send_message(CHAT_ID, text)
+
+# ===== ALERT =====
+async def smart_alert():
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute("""
+        SELECT truck, note FROM logs
+        WHERE action='issue'
+        AND datetime(created_at) <= datetime('now', '-2 day')
+        """)
+        old_issues = await cursor.fetchall()
+
+        cursor2 = await db.execute("""
+        SELECT truck FROM trucks WHERE status='shop'
+        """)
+        shop_trucks = [r[0] for r in await cursor2.fetchall()]
+
+    if not old_issues and not shop_trucks:
+        return
+
+    text = "🚨 ALERT\n\n"
+
+    if old_issues:
+        text += "⚠️ OVERDUE:\n"
+        for t, n in old_issues:
+            text += f"{t} — {n}\n"
+
+    if shop_trucks:
+        text += "\n🛠 SHOP:\n"
+        for t in shop_trucks:
+            text += f"{t}\n"
 
     if CHAT_ID:
         await bot.send_message(CHAT_ID, text)
@@ -126,11 +218,13 @@ async def report_cmd(message: types.Message):
 
 # ===== SCHEDULE =====
 scheduler.add_job(daily_report, "cron", hour=17, minute=0)
+scheduler.add_job(smart_alert, "cron", hour=12, minute=0)
 
 # ===== MAIN =====
 async def main():
     keep_alive()
     await init_db()
+    await insert_trucks()  # 1 marta ishlaydi keyin o‘chir
     scheduler.start()
     await dp.start_polling(bot)
 
